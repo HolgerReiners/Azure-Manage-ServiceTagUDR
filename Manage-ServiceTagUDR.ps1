@@ -51,7 +51,7 @@
 # of the possibility of such damages.
 ################################################################################################
 <#
-.SYNOPSIS
+.SYNOPSIS  
     manage Azure Service Tags in Azure User-Defined Routes (UDR)
 .DESCRIPTION
     it will add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
@@ -64,23 +64,20 @@
     
 .EXAMPLE
 .\<ScriptName>
-.\<ScriptName> -cloudEnv "<PathToLogFile>" -LogReset -EventLog -EnableDebug -EnableVerbose
+.\<ScriptName> -LogFile "<PathToLogFile>" -LogReset -EventLog -EnableDebug -EnableVerbose
 
-.PARAMETER -cloudEnv
-   choose the cloud environment ['Public','USGov','China','Germany']
-.PARAMETER -serviceTag
-   specify the service tag name to use in the operation
-.PARAMETER -operation
-   operation to perform ['add','update','delete']
-.PARAMETER -subscription
-   Azure subscription  where the route table exist
-.PARAMETER -resourceGroup
-   Azure resource group name where the route table exist
-.PARAMETER -routeTable
-   route table to operate on
+.PARAMETER LogFile
+   enables the log to file and specifies the log file.
+.PARAMETER -LogReset
+   will clear the log file
+.PARAMETER -EventLog
+   enables the logging to the Applicaton Eventlog
+.PARAMETER -Debug
+   enables the script debug messages
+.PARAMETER -Verbose
+   enables the script verbose messages
 #>
 
-######### Parameters #########
 param (
     [Parameter(Mandatory = $false)]
     [ValidateSet('Public','USGov','China','Germany')]
@@ -103,7 +100,8 @@ param (
     [string] $routeTable
 )
 
-######### Functions #########
+######### MAIN
+
 function Get-ServiceTagDownloadUri {
     # .SYNOPSIS  
     #    Returns the download URI of the Azure IP Ranges and Service Tags of the specified cloud environment
@@ -138,61 +136,60 @@ function Get-ServiceTagDownloadUri {
     Return $downloadUri
 }
 
-function get-AzureDcIpJson {
+function Get-ServiceTagIpRangeJson {
     # .SYNOPSIS  
-    #    
+    #    Returns the download URI of the Azure IP Ranges and Service Tags of the specified cloud environment
     # .DESCRIPTION  
-    #    
+    #    Returns the download URI of the Azure IP Ranges and Service Tags of the specified cloud environment
     #  .NOTES  
     #    Author: Holger Reiners, Microsoft, 2020
     #  
+    [OutputType([String])]
     param (
         [Parameter(Mandatory = $true)]
-        [string] $AzureDcIpUri
-    )
-    
-    # init return value as NULL
-    $dcIpJson = $null
-
-    try {
-        # download the Azure Datacenter IP JSON file
-        $uriResponse = invoke-webrequest -Uri $downloadUri
-        if ($uriResponse.StatusCode -eq 200) {
-            $content = [System.Text.Encoding]::UTF8.GetString($uriResponse.Content)
-            $dcIpJson = ConvertFrom-JSON $content
-        }
-    }
-    catch {
-        $dcIpJson = $null
-    }
-    
-    Return $dcIpJson
-}
-
-function Template {
-    # .SYNOPSIS  
-    #    
-    # .DESCRIPTION  
-    #    
-    #  .NOTES  
-    #    Author: Holger Reiners, Microsoft, 2020
-    #  
-    param (
-        [Parameter(Mandatory = $true)]
-        [string] $ParameterInput
+        [ValidateSet('Public','USGov','China','Germany')]
+        [string] $cloudEnv
     )
 
+    # URL / URI for cloud environment:
+    #  - Public Cloud - https://www.microsoft.com/download/details.aspx?id=56519 / "https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519"; 
+    #  - US Government - https://www.microsoft.com/download/details.aspx?id=57063 / "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57063"; 
+    #  - China - https://www.microsoft.com/download/details.aspx?id=57062 / "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57062"; 
+    #  - Germany - https://www.microsoft.com/download/details.aspx?id=57064 / "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57064"; 
+
+    switch($cloudEnv) {
+        "Public" {$downloadUri = "https://www.microsoft.com/en-us/download/confirmation.aspx?id=56519"}
+        "USGov" {$downloadUri = "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57063"}
+        "China" {$downloadUri = "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57062"}
+        "Germany" {$downloadUri = "https://www.microsoft.com/en-us/download/confirmation.aspx?id=57064"}
+    }
     
-    Return $ReturnObject
+    
+    # Download current list of Azure Public IP ranges
+    $downloadPage = Invoke-WebRequest -Uri $downloadUri;
+    $jsonFileUri = ($downloadPage.RawContent.Split('"') -like "https://*/ServiceTags_*")[0]; 
+    write-debug ("JSON file URI: " + $jsonFileUri)
+
+    $uriResponse = (invoke-webrequest $jsonFileUri)
+    $jsonResponse = [System.Text.Encoding]::UTF8.GetString($uriResponse.RawContent)
+    $azureDcIpJson = ConvertFrom-JSON $jsonResponse
+    
+    Return $downloadUri
 }
 
 function derrest {
-    $uriResponse = (invoke-webrequest $downloadUri)
+    
+    # Download current list of Azure Public IP ranges
+    $downloadPage = Invoke-WebRequest -Uri $downloadUri;
+    $jsonFileUri = ($downloadPage.RawContent.Split('"') -like "https://*/ServiceTags_*")[0]; 
+    write-debug ("JSON file URI: " + $jsonFileUri)
+
+    $uriResponse = (invoke-webrequest $jsonFileUri)
     $jsonResponse = [System.Text.Encoding]::UTF8.GetString($uriResponse.RawContent)
     $azureDcIpJson = ConvertFrom-JSON $jsonResponse
 
     $serviceTagName = "APIManagement"
-    $prefixes = ($azureDcIpJson.values |Exit-PSHostProcess Where-Object {$_.Name -eq $serviceTagName} | Select-Object -ExpandProperty properties).addressPrefixes
+    $prefixes = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagName} | Select-Object -ExpandProperty properties).addressPrefixes
     
     $counter = 0
     $date = Get-Date -Format "yyyyMMddTHHmmss"
@@ -215,11 +212,6 @@ function main {
     write-debug ("  resource group    : $resourceGroup")
     write-debug ("  routetable        : $routeTable")
 
-    $AzureDcIpJson = get-AzureDcIpJson -AzureDcIpUri $downloadUri
-    if (!($AzureDcIpJson -eq $null)) {
-        $AzureDcIpJson.values
-    }
-    
 }
 
 main
