@@ -14,6 +14,7 @@
 #
 # prerequisites:
 #   - Authenticated management session to the Azure cloud environment
+#   - correct subscription is selected and active
 #   - Powershell Az commands are installed - https://docs.microsoft.com/en-us/powershell/azure/
 #
 # input:
@@ -87,24 +88,27 @@ param (
     [string] $cloudEnv = "Public", 
     
     [Parameter(Mandatory = $true)]
-    [string] $serviceTag,
+    [array] $serviceTag,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('add','update','delete')]
+    [ValidateSet('add','remove')]
     [string] $operation, 
     
-    [Parameter(Mandatory = $true)]
-    [string] $subscription, 
+#    [Parameter(Mandatory = $true)]
+#    [string] $subscription, 
     
     [Parameter(Mandatory = $true)]
     [string] $resourceGroup, 
     
     [Parameter(Mandatory = $true)]
-    [string] $routeTable
+    [string] $routeTableName,
+
+    [Parameter(Mandatory = $false)]
+    [string] $routePrefix = "STUDR"
 )
 
 ######### Functions #########
-function Get-ServiceTagDownloadUri {
+function get-ServiceTagDownloadUri {
     # .SYNOPSIS  
     #    Returns the download URI of the Azure IP Ranges and Service Tags of the specified cloud environment
     # .DESCRIPTION  
@@ -134,9 +138,10 @@ function Get-ServiceTagDownloadUri {
 
     $downloadPage = Invoke-WebRequest -Uri $downloadUrl;
     $downloadUri = ($downloadPage.RawContent.Split('"') -like "https://*/ServiceTags_*")[0];
+    #Possible TODO Download only if change NR > last run
 
     Return $downloadUri
-}
+} # get-ServiceTagDownloadUri
 
 function get-AzureDcIpJson {
     # .SYNOPSIS  
@@ -167,7 +172,7 @@ function get-AzureDcIpJson {
     }
     
     Return $dcIpJson
-}
+} # get-AzureDcIpJson
 
 function Template {
     # .SYNOPSIS  
@@ -184,42 +189,80 @@ function Template {
 
     
     Return $ReturnObject
-}
-
-function derrest {
-    $uriResponse = (invoke-webrequest $downloadUri)
-    $jsonResponse = [System.Text.Encoding]::UTF8.GetString($uriResponse.RawContent)
-    $azureDcIpJson = ConvertFrom-JSON $jsonResponse
-
-    $serviceTagName = "APIManagement"
-    $prefixes = ($azureDcIpJson.values |Exit-PSHostProcess Where-Object {$_.Name -eq $serviceTagName} | Select-Object -ExpandProperty properties).addressPrefixes
-    
-    $counter = 0
-    $date = Get-Date -Format "yyyyMMddTHHmmss"
-    foreach ($prefix in $prefixes) {
-        write-debug "UDR-$serviceTagName-$counter-$date || $prefix"
-        $counter ++
-    }
-}
+} # Template
 
 function main {
     ### get cloud environment URL / URI
     $downloadUri = Get-ServiceTagDownloadUri $cloudEnv
 
-    write-debug ("working parameters")
-    write-debug ("  cloud environment : $cloudEnv")
-    write-debug ("  download URI      : $downloadUri")
-    write-debug ("  service tag       : $serviceTag")
-    write-debug ("  operation         : $operation")
-    write-debug ("  subscription      : $subscription")
-    write-debug ("  resource group    : $resourceGroup")
-    write-debug ("  routetable        : $routeTable")
+    write-verbose ("working parameters")
+    write-verbose ("  cloud environment : $cloudEnv")
+    write-verbose ("  download URI      : $downloadUri")
+    write-verbose ("  service tag       : $serviceTag")
+    write-verbose ("  operation         : $operation")
+    write-verbose ("  subscription      : $subscription")
+    write-verbose ("  resource group    : $resourceGroup")
+    write-verbose ("  routetable        : $routeTableName")
 
+    # Get the Azure datacenter IP as JSON
     $AzureDcIpJson = get-AzureDcIpJson -AzureDcIpUri $downloadUri
-    if (!($AzureDcIpJson -eq $null)) {
-        $AzureDcIpJson.values
+    if ($AzureDcIpJson -eq $null) {
+        throw "no Azure Datacenter IP JSON file downloaded!"
     }
+    # set parameters from JSON
+    $changeNumber = $AzureDcIpJson.changeNumber
+    $cloud = $AzureDcIpJson.cloud
+
+    # Get route table
+    $routeTable = Get-AzRouteTable -ResourceGroupName $resourceGroup -Name $routeTableName
+    if ($routeTable -eq $null) {
+        throw "route table $routeTableName in ResourceGroupName $resourceGroup not found."
+    }
+
+    # process all service tags
+    foreach ($serviceTagItem in $serviceTag) {
+        write-verbose ("working on service tag item : $serviceTagItem")
+        
+        # TODO - Get Change Number of particular Service
+        # TODO - verify the service tag change number with the route change number
+        
+        # remove existing routes for the service tag
+        $prefix = "$routePrefix-$serviceTagItem"
+        $routes = $routeTable.Routes | Where-Object {$_.Name -like "$routePrefix-$serviceTagItem*"}
+        foreach ($route in $routes.Name) {
+            write-verbose ("  REMOVE route : $route")
+            Remove-AzRouteConfig -RouteTable $routeTable -Name $route | Out-Null
+        }
+
+        if ($operation -eq "add") {
+            # add routes for the service tag
+            $serviceTagName = $serviceTagItem
+            $serviceTagRoutes = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagName} | Select-Object -ExpandProperty properties).addressPrefixes
+            
+            #TODO
+            #If routes would exceed 400 break
+            if ($routeTable.Routes.Count + $serviceTagRoutes.count -gt 400){
+                #do break stuff
+            }
+
+            $counter = 0
+            $date = Get-Date -Format "yyyyMMdd"
+            foreach ($serviceTagRoute in $serviceTagRoutes) {
+                write-verbose "  $prefix-$counter-$cloud-$changeNumber-$date || $serviceTagRoute"
+                $routeName = "$prefix-$counter-$cloud-$changeNumber-$date"
+                Add-AzRouteConfig -RouteTable $routeTable -Name $routeName -AddressPrefix $serviceTagRoute -NextHopType Internet | Out-Null
+                $counter ++
+            }
+            Write-Verbose "  Route count: $routeTable.Routes.Count"
+        }
+    } # foreach ServiceTagItem
     
-}
+    if ($routeTable.Routes.Count -le 400) {
+        Write-Verbose "Update route table $routeTable"
+        Set-AzRouteTable -RouteTable $routeTable | Out-Null
+    }
+            
+} # main
 
 main
+trap {"Error found: $_"}
