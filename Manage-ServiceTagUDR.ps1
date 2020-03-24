@@ -8,9 +8,10 @@
 #
 # purpose:
 #   manage Azure Service Tags in Azure User-Defined Routes (UDR)
-#   it will add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
+#   it can add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
+#   it can remove for a specific Azure service tag the IP route from the UDR (ServiceTagUDR).
 #   every ServiceTagUDR be in the naming format
-#       AStUdr-<ServiceTag>-<###>-<ChangeNr>-<date of update>
+#       <prefix>-<cloud>-<serviceTag>-<serviceTagChangeNr>-<routeNumber>-<date of update>
 #
 # prerequisites:
 #   - Authenticated management session to the Azure cloud environment
@@ -18,12 +19,11 @@
 #   - Powershell Az commands are installed - https://docs.microsoft.com/en-us/powershell/azure/
 #
 # input:
-#   UDR - to update, must exist
-#   activity - management action of Service Tag IPs on the UDR (add or update, delete)
-#   ServiceTag - ServiceTag to use for the operation
+#   routeTableName - route table to update, must exist
+#   operation - management action of ervice tag IPs on the UDR (add or remove)
+#   ServiceTag - ServiceTag to use for the operation, as defined in the Azure Service Tag JSON
 #
 # output:
-#   - success or failue (true / false)
 #   - updated UDR in the Azure cloud environment
 #
 # additional information:
@@ -94,9 +94,6 @@ param (
     [ValidateSet('add','remove')]
     [string] $operation, 
     
-#    [Parameter(Mandatory = $true)]
-#    [string] $subscription, 
-    
     [Parameter(Mandatory = $true)]
     [string] $resourceGroup, 
     
@@ -145,9 +142,9 @@ function get-ServiceTagDownloadUri {
 
 function get-AzureDcIpJson {
     # .SYNOPSIS  
-    #    
+    #    Download the Azure Datacenter IP JSON file, return as a JSON object
     # .DESCRIPTION  
-    #    
+    #    Download the Azure Datacenter IP JSON file, return as a JSON object
     #  .NOTES  
     #    Author: Holger Reiners, Microsoft, 2020
     #  
@@ -174,23 +171,6 @@ function get-AzureDcIpJson {
     Return $dcIpJson
 } # get-AzureDcIpJson
 
-function Template {
-    # .SYNOPSIS  
-    #    
-    # .DESCRIPTION  
-    #    
-    #  .NOTES  
-    #    Author: Holger Reiners, Microsoft, 2020
-    #  
-    param (
-        [Parameter(Mandatory = $true)]
-        [string] $ParameterInput
-    )
-
-    
-    Return $ReturnObject
-} # Template
-
 function main {
     ### get cloud environment URL / URI
     $downloadUri = Get-ServiceTagDownloadUri $cloudEnv
@@ -209,9 +189,11 @@ function main {
     if ($AzureDcIpJson -eq $null) {
         throw "no Azure Datacenter IP JSON file downloaded!"
     }
-    # set parameters from JSON
-    $changeNumber = $AzureDcIpJson.changeNumber
+    # set parameters for the run
+    $cloudChangeNumber = $AzureDcIpJson.changeNumber
     $cloud = $AzureDcIpJson.cloud
+    $operationDate = Get-Date -Format "yyyyMMdd"
+    $routeTableUpdate = $False # will be true if changes are made
 
     # Get route table
     $routeTable = Get-AzRouteTable -ResourceGroupName $resourceGroup -Name $routeTableName
@@ -221,45 +203,68 @@ function main {
 
     # process all service tags
     foreach ($serviceTagItem in $serviceTag) {
-        write-verbose ("working on service tag item : $serviceTagItem")
-        
-        # TODO - Get Change Number of particular Service
-        # TODO - verify the service tag change number with the route change number
-        
-        # remove existing routes for the service tag
-        $prefix = "$routePrefix-$serviceTagItem"
-        $routes = $routeTable.Routes | Where-Object {$_.Name -like "$routePrefix-$serviceTagItem*"}
-        foreach ($route in $routes.Name) {
-            write-verbose ("  REMOVE route : $route")
-            Remove-AzRouteConfig -RouteTable $routeTable -Name $route | Out-Null
-        }
+        # Read changeNumber of service tag item
+        $ServiceTagChangeNumber = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagItem}).properties.changenumber
+
+        # get the routes of the route table for the service tag prefix
+        $prefix = "$routePrefix-$cloud-$serviceTagItem"
+        $prefixWithChangeNumber = "$prefix-$ServiceTagChangeNumber"
+        $routes = $routeTable.Routes | Where-Object {$_.Name -like "$prefix*"}
+
+        write-verbose ("working on service tag item : $serviceTagItem / changeNumber: $ServiceTagChangeNumber / $prefixWithChangeNumber")
 
         if ($operation -eq "add") {
+            # verify the service tag change number with existing route change number, If (ADD and Change Number different => Remove) OR (REMOVE)
+            $routeRemove=$False
+            foreach ($route in $routes.Name) {
+                write-verbose ("  CHECK route : $route")
+                if (!($route -like "$prefixWithChangeNumber*")  ) {
+                    # One service tag route has a different changeNumber
+                    $routeRemove=$true
+                }
+            }
+        }
+
+        # If operation = remove OR
+        #    one service tag route is from different change => remove all routes
+        if (($operation -eq "remove") -or ($routeRemove-eq $true) ) {
+            # remove existing routes for the service tag
+            foreach ($route in $routes.Name) {
+                write-verbose ("  REMOVE route : $route")
+                Remove-AzRouteConfig -RouteTable $routeTable -Name $route | Out-Null
+            }
+            $routeTableUpdate = $true
+        }
+
+        # Run ADD operation if:
+        #   service tag routes are changed (and before removed) OR
+        #   there was no service tag route in route table before
+        if ( (($operation -eq "add") -and ($routeRemove-eq $true)) -or (($operation -eq "add") -and ($routes -eq $null)) ) {
             # add routes for the service tag
-            $serviceTagName = $serviceTagItem
-            $serviceTagRoutes = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagName} | Select-Object -ExpandProperty properties).addressPrefixes
+            $serviceTagRoutes = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagItem} | Select-Object -ExpandProperty properties).addressPrefixes
             
-            #TODO
-            #If routes would exceed 400 break
+            #If total route in route table exceed 400 => break
             if ($routeTable.Routes.Count + $serviceTagRoutes.count -gt 400){
-                #do break stuff
+                throw "Operation will result in more than 400 routes in the routing table. Abort operation, no changes made to the routing table." 
             }
 
             $counter = 0
-            $date = Get-Date -Format "yyyyMMdd"
             foreach ($serviceTagRoute in $serviceTagRoutes) {
-                write-verbose "  $prefix-$counter-$cloud-$changeNumber-$date || $serviceTagRoute"
-                $routeName = "$prefix-$counter-$cloud-$changeNumber-$date"
+                $routeName = "$prefix-$ServiceTagChangeNumber-$counter-$operationDate"
+                write-verbose "  ADD route: $routeName || $serviceTagRoute"
                 Add-AzRouteConfig -RouteTable $routeTable -Name $routeName -AddressPrefix $serviceTagRoute -NextHopType Internet | Out-Null
                 $counter ++
             }
-            Write-Verbose "  Route count: $routeTable.Routes.Count"
+            $routeTableUpdate = $true
         }
-    } # foreach ServiceTagItem
+    }
     
-    if ($routeTable.Routes.Count -le 400) {
-        Write-Verbose "Update route table $routeTable"
+    if ($routeTableUpdate) {
+        # write the update route table
+        Write-Verbose "UPDATE route table '$routeTableName'"
         Set-AzRouteTable -RouteTable $routeTable | Out-Null
+    } else {
+        Write-Verbose "NO updates made on route table '$routeTableName'"
     }
             
 } # main

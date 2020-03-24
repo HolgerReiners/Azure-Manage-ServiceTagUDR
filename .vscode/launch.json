@@ -11,6 +11,6 @@
             "request": "launch",
             "script": "${file}",
             "cwd": "${file}",
-            "args": ["-cloudEnv Public -serviceTag ApiManagement,AzureBackup -operation remove  -subscription 'SubDemos' -resourceGroup 'DynlabOnPrem' -routeTable 'rt-onprem' -verbose"]        }
+            "args": ["-cloudEnv Public -serviceTag ApiManagement.WestEurope,ActionGroup.WestEurope,AzureBackup.WestEurope -operation remove -resourceGroup 'DynlabOnPrem' -routeTable 'rt-onprem' -verbose"]        }
     ]
 }
