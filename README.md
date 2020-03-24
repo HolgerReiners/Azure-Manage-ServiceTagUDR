@@ -1,11 +1,13 @@
 # Azure-Manage-ServiceTagUDR
 
 ## purpose
-manage Azure Service Tags in Azure User-Defined Routes (UDR)
-it can add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
-it can remove for a specific Azure service tag the IP route from the UDR (ServiceTagUDR).
+Manage Azure Service Tags in Azure User-Defined Routes (UDR)
+
+It can add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
+It can remove for a specific Azure service tag the IP route from the UDR (ServiceTagUDR).
 every ServiceTagUDR be in the naming format
-  <prefix>-<cloud>-<serviceTag>-<serviceTagChangeNr>-<routeNumber>-<date of update>
+
+route name will be formated as: < prefix >-< cloud >-< serviceTag >-< serviceTagChangeNr >-< routeNumber >-< date of update >
 
 ## prerequisites
   - Authenticated management session to the Azure cloud environment
