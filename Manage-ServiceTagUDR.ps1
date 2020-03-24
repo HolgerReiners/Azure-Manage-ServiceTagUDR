@@ -19,9 +19,12 @@
 #   - Powershell Az commands are installed - https://docs.microsoft.com/en-us/powershell/azure/
 #
 # input:
-#   routeTableName - route table to update, must exist
-#   operation - management action of ervice tag IPs on the UDR (add or remove)
-#   ServiceTag - ServiceTag to use for the operation, as defined in the Azure Service Tag JSON
+#   cloudEnv [mandatory] - cloud environment information to use ['Public','USGov','China','Germany']
+#   serviceTag [mandatory] - ServiceTag to use for the operation, as defined in the Azure Service Tag JSON
+#   operation [mandatory] - management action of ervice tag IPs on the UDR [add or remove]
+#   resourceGroup [mandatory] - resource group name, where the route table exist
+#   routeTableName [mandatory] - route table to operate, must exist before. will not be created
+#   routePrefix [optional] - route prefix, default 'STUDR' (service tag user defined route)#
 #
 # output:
 #   - updated UDR in the Azure cloud environment
