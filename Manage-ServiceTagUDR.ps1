@@ -189,18 +189,17 @@ function main {
 
     # Get the Azure datacenter IP as JSON
     $AzureDcIpJson = get-AzureDcIpJson -AzureDcIpUri $downloadUri
-    if ($AzureDcIpJson -eq $null) {
+    if ($null -eq $AzureDcIpJson) {
         throw "no Azure Datacenter IP JSON file downloaded!"
     }
     # set parameters for the run
-    $cloudChangeNumber = $AzureDcIpJson.changeNumber
     $cloud = $AzureDcIpJson.cloud
     $operationDate = Get-Date -Format "yyyyMMdd"
     $routeTableUpdate = $False # will be true if changes are made
 
     # Get route table
     $routeTable = Get-AzRouteTable -ResourceGroupName $resourceGroup -Name $routeTableName
-    if ($routeTable -eq $null) {
+    if ($null -eq $routeTable) {
         throw "route table $routeTableName in ResourceGroupName $resourceGroup not found."
     }
 
@@ -242,7 +241,7 @@ function main {
         # Run ADD operation if:
         #   service tag routes are changed (and before removed) OR
         #   there was no service tag route in route table before
-        if ( (($operation -eq "add") -and ($routeRemove-eq $true)) -or (($operation -eq "add") -and ($routes -eq $null)) ) {
+        if ( (($operation -eq "add") -and ($routeRemove-eq $true)) -or (($operation -eq "add") -and ($null -eq $routes)) ) {
             # add routes for the service tag
             $serviceTagRoutes = ($azureDcIpJson.values | Where-Object {$_.Name -eq $serviceTagItem} | Select-Object -ExpandProperty properties).addressPrefixes
             
