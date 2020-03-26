@@ -54,35 +54,38 @@
 # the use of or inability to use the sample or documentation, even if Microsoft has been advised 
 # of the possibility of such damages.
 ################################################################################################
+
 <#
-.SYNOPSIS
-    manage Azure Service Tags in Azure User-Defined Routes (UDR)
+.SYNOPSIS  
+   manage Azure Service Tags in Azure User-Defined Routes (UDR)
 .DESCRIPTION
     it will add for a specific Azure service tag the IP ranges from the JSON file into the UDR (ServiceTagUDR).
     every ServiceTagUDR be in the naming format
-      AStUdr-[ServiceTag]-[###]-[ChangeNr]-[date of update]
 .NOTES  
-    File Name  : <ScriptName>.ps1
-    Author     : <Author>
+    File Name  : Manage-ServiceTagUDR.ps1
+    Author     : Holger Reiners, Christian Thönes
 .LINK  
-    
+    https://github.com/HolgerReiners/Azure-Manage-ServiceTagUDR
 .EXAMPLE
-.\<ScriptName>
-.\<ScriptName> -cloudEnv "<PathToLogFile>" -LogReset -EventLog -EnableDebug -EnableVerbose
+.\Manage-ServiceTagUDR.ps1
 
-.PARAMETER -cloudEnv
+.EXAMPLE
+.\Manage-ServiceTagUDR.ps1 -cloudEnv Public -serviceTag ApiManagement.WestEurope,ActionGroup.WestEurope,AzureBackup.WestEurope -operation add -resourceGroup 'rg-demo' -routeTable 'rt-demo' -verbose
+
+.PARAMETER cloudEnv
    choose the cloud environment ['Public','USGov','China','Germany']
-.PARAMETER -serviceTag
+.PARAMETER serviceTag
    specify the service tag name to use in the operation
-.PARAMETER -operation
+.PARAMETER operation
    operation to perform ['add','update','delete']
-.PARAMETER -subscription
+.PARAMETER subscription
    Azure subscription  where the route table exist
-.PARAMETER -resourceGroup
+.PARAMETER resourceGroup
    Azure resource group name where the route table exist
-.PARAMETER -routeTable
+.PARAMETER routeTable
    route table to operate on
 #>
+
 
 ######### Parameters #########
 param (
