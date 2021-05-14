@@ -1,5 +1,10 @@
 # Azure-Manage-ServiceTagUDR
 
+***Update Notice***
+
+Service Tags for user-defined routes will be a feature in Azure. Please checkout the docs. 
+https://docs.microsoft.com/en-us/azure/virtual-network/virtual-networks-udr-overview
+
 ## purpose
 Manage Azure Service Tags in Azure User-Defined Routes (UDR)
 
